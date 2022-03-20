@@ -1,0 +1,677 @@
+JFROG CONAN NOTES:
+
+https://academy.jfrog.com/path/conan/conan-essentials  (training course)
+https://www.jfrog.com/confluence/display/RT12/User+Guide
+https://github.com/conan-io/training/issues
+https://docs.conan.io/en/latest/installation.html
+https://conan.io/downloads.html
+Nano tutorial:  https://www.youtube.com/watch?v=cLyUZAabf40k
+Default Artifactory URL:  http://localhost:8082 (Artifactory default "admin" account. Username: admin, Password: password.)
+Default Artifactory Credentials: https://www.jfrog.com/confluence/display/RT12/FAQs#:~:text=Artifactory%20comes%20with%20a%20pre-configured%20default%20%22admin%22%20account
+
+Environment setup:
+
+git clone https://github.com/conan-io/training
+cd training/docker_environment
+docker-compose up -d
+docker exec -it conan-training bash  # can rerun  this command from a new shell if disconnected
+
+Continue after getting stuck:
+In home/conan/training..run with current excercise number as argument:
+$ ../catchup.sh # option 5
+
+Conan commands used:
+
+$ conan remote list (to see remote/local artifactory servers) 
+  ex. displaying remote server "conancenter" and my local server "myconanrepo"  
+  ~$ conan remote list
+   conancenter: https://center.conan.io [Verify SSL: True]
+   myconanrepo: http://jfrog-artifactory-training:8081/artifactory/api/conan/myconanrepo [Verify SSL: True]
+
+$ conan info <dots or path to find conanfile.py or conanfile.txt files>
+$ conan info .. --graph=file.html (create web-browseable output file.html w/ dependency graph)
+
+$ conan search  ( search local conan repo for package references )
+$ conan search <package reference>  ( specific local package reference and can include wildcards, like "*" )
+$ conan search <package reference> -r=conancenter ( search for package on named remote server )
+$ conan search zlib/1.2.11@ [--table=<file>.html] [-r=<conancenter>] [--query] (optional query for binaries)
+
+*** "Consume" Conan packages ***
+
+$ conan install .. (defaults to Release build)
+$ conan install .. -s build_type=Debug
+
+Conan "Generators" for Visual Studio, CMake, XCode, pkg-config, qmake,... or your own custom one!
+  Will see a "[generators]" section in conanfile.txt
+
+"Consume" a package with the simple CMake "generator"...
+conanfile.txt and CMakeLists.txt files
+$ conan install .. [-s build_type=<Debug/Release>] (check generated conanbuildinfo.cmake)
+$ cmake .. -DCMAKE_BUILD_TYPE=<Debug/Release>
+$ cmake --build .  ( If no build errors, can run exec as bin/<execname> )
+
+"Consume" a package with no make/build system (ex. no makefile, just call GCC directly)...
+$ conan install . -g compiler_args  (check conanbuildinfo.args)
+$ g++ <file>.cpp @conanbuildinfo.args -o <outputname> -std=c++11 (if no errors, can run exec ./<outputname>)
+
+"Consume" a package with "CMake Find Package" generator... 
+   Does not add any conan specific stuff in text files used in make, ex. the CMakeLists.txt file
+   This is intended to keep your package make/build files very open source compatible.
+   
+$ conan install ..  (check generated Find<pkg>.cmake file or files)
+$ cmake .. -DCMAKE_BUILD_TYPE=Release
+$ cmake --build .  (if no errors, can run executable)
+
+*** Create your own Conan packages ***
+  Use your first python "conanfile.py" recipe 
+  Most basic functions in a recipe: source(), build(), package(), package_info()
+  conan new - creates recipe for you (produces conanfile.py, sources, test_package, etc.)
+  conan create - creates the package for you (creates in PC local cache, not uploaded to artifactory server repo yet)
+  
+Create package from GitHub source (Ex. simple "Hello" library from github repo)
+$ conan new <lib/pkg name>/<version> (check the generated conanfile.py)
+$ conan create . user/testing [-s build_type=Debug]  (user/testing to distinguish user created packages)
+$ conan search <pkg>/<ver>@user/testing (should see Release and Debug build types of your package)
+
+Use case: Say you want to add your newly created package/library as a dependency of another package:
+	1. Modify conanfile.txt to account for new dependency in dependent package
+	2. Modify CMakeLists.txt of dependent package to account for new CONAN_PKG::<pkg dependency>
+	3. Modify dependent package source to include new dependency ".h" include file
+	4. Now you can call the api's defined in your new dependency package (library) from the dependent package source 
+
+*** Create and Test Package ***
+Not a unit test of your source, just for testing package info.
+Uses "-t" flag when invoking 'conan new'.
+The conanfile.py contains the test() method.
+For example,
+
+$ conan new <pkg>/<ver> -t  (the -t generates test_package)
+$ conan create . user/testing [ -s build_type=Debug ]  
+
+*** Create with source ***
+What about creating a package from some local source,
+  where the source and the recipe 'live together'?
+Referred to as an "in source" recipe, whereas creating from github is an "out of source" recipe.
+$ conan new <pkg>/<ver> [-t] -s  ( -s generates 'src' folder )
+(Conan recipe created by new command using -t, has no source(), but has attribute 'export_sources'.)
+$ conan create . user/testing [-s build_type=Debug]
+
+*** Create with SCM ***
+Conan class in conanfile.py has 'scm' attribute that supports both git and svn systems.
+
+*** Upload packages to remote repositories (Artifactory) ***
+Assume conan repository was created on the remote (artifactory) server.
+Artifactory has 'Set Me Up' button that will give you the conan command to add the server repo on your client(PC).
+$ conan remote add <remote repo name> <URL> (See SetMeUp: Remote is name of repo, URL is full path to server and repo)  
+
+(Upload command uploads from your local cache to the remote repository)
+$ conan upload "<pkg>*" -r <remote repo name> (By default, only recipe is uploaded, not the binaries)
+$ conan upload "*" -r <remote repo name> [--all --confirm] (Upload all package from local cache based on wildcard pattern)
+
+(Check locally that remote has packages uploaded)
+$ conan remote list
+$ conan search "*" -r=<remote repo name>  
+$ conan search <pkg>/<ver>@user/testing -r=<remote repo name>
+
+*** Exploring the Conan Local Cache ***
+$ ls ~/.conan (conan home)
+$ ls ~/.conan/data (conan cache area)
+$ ls ~/.conan/data/<pkg>/<ver>
+$ ls ~/.conan/data/<pkg>/<ver>/user/testing/package/<id>/include (<id> is hashed value package id)
+$ ls ~/.conan/data/<pkg>/<ver>/user/testing/package/<id>/lib
+
+$ conan remove "*" -f (clear all packages from cache)
+$ conan search (should show that local cache is empty)
+$ ls ~/.conan/data (should be gone/empty)
+
+*** Using a package from Conan-Center repo (Artifactory remote server) ***
+$ conan install .. [-r=<remote repo name>
+(Then perform build steps and test that built app runs,...)
+
+*** Build Configuration Mechanisms ***
+"Settings" - found in global conan file (~/.conan/settings.yml): 
+   ex) build_type, compilers, compiler version, cross building to architecture, etc.
+"Options" - found in conan recipe files (package's conanfile.py):
+   ex) shared, static, active FPU, etc. 
+
+shared/static option in conanfile.py, 
+   options = {"shared": [True, False]}  (can set shared on command line to True or False)
+   default_options = {"shared": False}  (shared option will default to True)
+   
+$ conan create . user/testing -o <pkg>:shared=True
+$ conan create . user/testing -o <pkg>:shared=True [-s build_type=Debug]
+   
+Adding a new arbitrary option,in conanfile.py 
+   1. Say you have macro used in source files, say "GREET_LANGUAGE"
+   2. And target_compile_definitions(...GREET_LANGUAGE=${GREET_LANGUAGE}) in CmakeLists.txt
+   3. In conanfile.py,
+		options = {"language": ["English", "Spanish"]}
+		default_options = {"language" : "English"}
+		and in build() will check self.options.language and set cmake.definitions["GREET_LANGUAGE"]
+$ conan create . user/testing -O greet:language=English
+$ conan create . user/testing -O greet:language=Spanish
+
+Can inspect available options,
+$ conan inspect <pkg>/0.1@user/testing
+$ conan inspect zlib/1.2.11@
+$ conan get zlib/1.2.11@
+
+*** Conan Profiles ***
+
+$ conan profile list
+$ conan profile show default
+
+When you do a create, like "conan create . user/testing"
+  that is same as "conan create . user/testing -pr=default" (use default profile)
+  
+Profiles are just text files under ~/.conan/profiles
+$ ls ~/.conan/profiles 
+
+Profiles are easy to share between teams.
+Note: Conan will look locally as well as in your home dir for profile files.
+Note: Conan profile files have no file extension.
+
+Can define per-package settings and env-vars:
+   [settings]
+   OpenSSL:compiler.version=4.8
+   [env]
+   zlib:CC=arm-linux-gnuabihf-gcc-patched
+   
+Use case example is cross-compiling with common env variables CC and CXX.
+
+Helper command:
+$ conan config install
+
+Too cumbersome to keep passing options on command line so use profiles instead:
+Profile composition:
+
+$ conan install . -pr=windows -pr=vs2017 (use profile files named "windows" and "vs2017")
+$ conan install . -pr=windows -pr=vs2017 -s build_type=Debug
+$ conan create . -pr=windows -pr=vs2017 
+
+*** Homework ***
+Package the open source library Pico JSON:
+https://github.com/kazuho/picojson.git
+
+Tips:
+   It is a header-only library and doesn't need settings or build() method
+   Use "conan new --help"
+   Use "test_package" to get some code from their github
+
+Upload it to your Artifactory
+Use it in the "consumer" project.
+
+*** ADVANCED Notes ***
+https://academy.jfrog.com/conan-advanced
+
+** Requirements
+
+* Transitive requirements:
+
+ex) If 'hello' package depends on zlib, therefore hello's test_package has a transitive requirement for zlib.
+
+Every packages test_package has a transitive requirement on the package dependencies of the package it is testing.
+
+Transitive requiring zlib:
+	
+$ conan create . user/testing
+$ conan create . user/testing -pr=rpi_armv7 (will error b/c we don't have raspberry pi cross-compiled version of zlib)
+$ conan create . user/testing -pr=rpi_armv7 --build=missing (will go get the cross-compiled zlib for us!)
+
+Note: '--build=missing' convenient for local use when binaries aren't available,
+ but can be time consuming for large projects. It will build the entire dependency graph from source.
+ Therefore, not a good fit for CI enterprise, where you want to efficiently build the dependency graph 
+ package-by-package (1-ci-job-per-package approach).
+ 
+* Version conflicts:
+
+ex) Where two packages require a common dependency, but two different versions 
+	of the dependency!
+
+$ conan create lib_a user/testing
+$ conan create lib_b user/testing
+$ conan install . (will error b/c lib_a requires zlib/1.2.11 and lib_b requires zlib/1.2.8)
+
+( Need to edit 'conanfile.txt' in end consumer package and add zlib/1.2.11 to [requires]. This will override lib_b's downstream dependency. )
+
+* Configuration conflicts:
+
+ex) Where two packages require a common dependency with different options.  Say zlib/1.2.11 but 
+    one library specified 'shared' and the other 'static' option.
+  
+( Need to fix in end consumer project's conanfile.txt [options] block or 
+  its conanfile.py configure(). ) 
+
+* Conditional requirements:
+
+Nature of C/C++, typically need to conditionally depend on one library based on an option value.
+
+$ conan create . user/testing -o <pkg>:<option>=<value>
+(Check o/p to see the dependencies - even if the dependency not used!
+ Observe under 'Requirements' and 'Packages' labeled o/p.)
+
+(Edit conanfile.py to modify requirements() with option if-check, to use/not use a dependency.
+ Based on option value, now the 'Requirements'/'Packages' indicate that package not used.)
+ 
+* Unit tests with 'gtest':
+
+to run unit tests as part of the build test.
+
+test.cpp:
+  include <gtest/gtest.h>
+  use TEST() and EXPECT_EQ() methods.
+
+conanfile.py:
+  option, 'requires' = "gtest/<ver>"
+  in build(), self.run("bin/runUnitTests")
+  
+$ conan create . user/testing  (in package using gtest)
+
+$ conan install . (in package consuming the package using gtest)
+( check o/p for dependencies - should see 'gtest' installed! )
+
+* Gtest as build_requires:
+
+A build() of a recipe is not always executed when a package is used by conan.  It is
+only executed when a package happens to be BUILT by conan. Sometimes only want to download and 
+install the dependency when a build is going to be done.
+
+Can change 'requires' to 'build_requires', so that the relevant dependencies are
+downloaded only when a build is necessary. Therefore, conan can use the binary that is already 
+built and in cache when no build is required.
+
+Ex)
+
+Edit conanfile.py and use 'build_requires' instead of 'requires'.
+$ conan create . user/testing
+Navigate to consumer of package and install.
+$ conan install . (check dependencies to see gtest not installed!)
+
+* CMake as build_requires:
+
+Note: 'build_requires' can be placed in conan profiles instead of recipes.
+Better practice to do this with profiles. Hard to decouple low-level build
+options/tools when stuck in recipes, but much easier to invoke options on 
+command line using a profile option. Much easier to override existing tools
+or tool versions.
+
+Ex)
+
+Say, CMakeLists.txt specifies a version of cmake to use.
+Say, 'cmake --version' shows cmake version installed currently.
+
+Create a profile file 'myprofile':
+  include(default)
+  
+  [build_requires]
+  cmake/3.16.3
+
+$ conan create . user/testing
+(observe cmake version should be what you saw with --version)
+
+$ conan create . user/testing -pr=myprofile (point to my profile file)
+(observe cmake version should be as specified in 'myprofile' now and conan
+ is no longer using your PC cmake version for this package.)
+
+'build_requires' effective use:
+	Use should not affect binary (it is not calculated as part of package ID hash!)
+	Use only for tools: build tools like cmake, testing frameworks
+	Use in profiles for common things (cmake)
+	Use in recipes for specific, and package specific things (testing framework)
+	
+* Run apps from packages:
+
+Run tools and other executables that are bundled in conan packages.
+Once a package is installed in local cache via the 'conan install' command, it can
+easily be run 'outside of conan'. This can be done w/o disturbing any system installs 
+of the same tool.
+ 
+Ex) Run cmake version from conan package in the user terminal.
+
+Three methods of doing this:
+
+1. Add method to conanfile.py (also conanfile.txt)
+   conanfile.py imports(), deploy() to import from cache.
+   Requires a conanfile.py for each place you want to run the tool,
+   and makes copies of binaries.
+2. Use 'deploy generator' copies dependencies to current folder:
+	$ conan install cmake/<vers>@ -g deploy
+	Don't need conanfile, but copies all files from all packages in the dependency tree
+	into named sub-directories.
+3. Use virtualvenv generators to use dependencies from cache
+	$ conan install cmake/<vers>@ -g virtualrunenv
+	Most elegant - No copies and no extra conanfiles.
+	
+Ex) 2. Deploy generator:
+
+$ cmake --version (to see system version)
+$ conan install cmake/3.16.3@ -g deploy ( creates local cmake subdir)
+$ cmake/bin/cmake --version ( shows version is 3.16.3 )
+$ rm -rf cmake ( remove the local cmake subdir - 'uninstall' )
+
+Ex) 3. virtualrunenv generator:
+
+$ cmake --version (to see system version)
+$ conan install cmake/3.16.3@ -g virtualrunenv (install the package version)
+$ cmake --version (still see system version)
+$ source activate_run.sh (activate the package version)
+$ cmake --version (now see the package version!)
+$ source deactivate_run.sh (deactivate the package version)
+$ cmake --version (now back to system version!)
+
+* Python requires:
+
+Utilize the 'python_requires' attribute.
+
+Reuse python code in recipes to enforce the DRY principle (Don't repeat yourself).
+Ex) Have 'mytools' package that will be consumed by another package.
+In 'mytools' conanfile.py, add method 'mymsg(conanfile)' outside it's class (to be shared).
+In the other (consumer) package class:
+	python_requires = "mytools/0.1@user/testing"
+	In build(), mytools = self.python_requires["mytools"].module
+	            mytools.mymsg(self)
+				
+In 'mytools' package folder:
+$ conan export . user/testing (use 'export' instead of 'install' to skip
+    unnecessary steps when using 'python_requires')
+(navigate to consumer package folder)
+$ conan create . user/testing (observe o/p from mymsg() run.)
+
+* Python requires (inheritance):
+
+Users want 'BaseConanFile' class with all the common stuff:
+
+	from conans import ConanFile
+	
+	class BaseConanFile(ConanFile): 
+		def build():
+		def package():
+		def package_info(): 
+	
+Then need 'PkgConan' class that extends the base class:
+
+	from conans import ConanFile
+	
+	class PkgConan(ConanFile): # inherits from ConanFile class (once loaded!)
+		python_requires = "mytools/0.1@user/testing"
+		python_requires_extend = "mytools.BaseConanFile" (base class file)
+		# inherits the source(), build()...
+		
+		
+Python requires facts:
+
+	Do not have binary packages
+	Can have dependencies to other python_requires
+	A recipe can have multiple python_requires
+	May contain oterh files (source file, build scripts)
+	Affect the package-ID (changing python_requires version
+	 might require build new binaries for packages using them.)	 
+
+** Versioning (versions, revisions, lock files)
+
+Bump (manual) version (semver):
+  semver is insufficient
+  1.2.3->1.2.4
+  
+Conan package versions can be passed on command line rather than hard-coded in the recipe.
+	Supports automatic versioning in CI, rather than modifying a conanfile.
+Also, conan provides first-class feature 'revisions' to solve this problem more comprehensively.
+	When 'revisions' enabled, conan will automatically produce unique revision numbers for unique builds of packages.
+	The revisions become part of package reference, enabling each build to be stored seperately in a conan repo.
+	
+Ex) Version ranges: Use version ranges to depend on versions.
+
+Modify a C++ library to create new version "<pkg>/0.2". The new library version should now get used.
+(example of 'chat' application (consumer) has dependency on library 'hello')
+
+In consumer (chat's) conanfile.py: 
+
+	requires = "<pkg>/[>0.0 <1.0]@user/testing"
+
+$ conan create hello hello/0.1@user/testing
+$ conan create chat user/testing (should see print message from hello version 0.1)
+  (now edit hello to update it's print message.)
+$ conan create hello hello/0.2@user/testing
+$ conan create chat user/testing (should see print message from hello version 0.2)
+
+Version ranges syntax:
+
+$ conan install "<pkg>/[>0.0 <1.0]@user/testing (any version between 0 and 1.0)
+$ conan install "<pkg>/[*]@user/testing (any version at all)
+$ conan install "<pkg>/[~1.1]@user/testing (any patch version w/i 1.1 - in other words, any version between 1.1.0 and 1.1.<infinity>)
+
+* Revisions feature:
+
+Is an opt-in feature, forces conan to generate an additional hash of the recipe contents every time the package is created.
+This hash is called the 'recipe revision' and it becomes part of (appended to) the package reference.
+
+<pkg>/version@user/channel#rrev (#rrev = recipe revision = hash of recipe contents)
+<pkg>/0.1@user/channel#rr1
+<pkg>/0.1@user/channel#rr2
+
+TAKE NOTE: both revisions are 'off of' the same package version, i.e. '0.1' !)
+
+Ex) Take advantage of the 'Revisions' feature instead of bumping the package version number.
+Limitation: Conan can only hold one revision of a package in the local cache at a time.
+            This means have to upload first package revision to central repo before creating second revision!
+			Otherwise, the first revision will be removed before second is created.
+
+$ conan config get (show ~/.conan/conan.conf file)
+$ conan set general.revisions_enabled=True
+$ conan config get (can see setting added under [general] section)
+$ conan remote list (see name and url for your repos)
+$ conan remote add myconanrepo http://jfrog-artifactory-training:8081/artifactory/api/conan/myconanrepo (using training one, may already be added)
+$ conan upload "hello*" -r myconanrepo --all --confirm (to save package version) 	
+$ conan remove "hello*" -f (now can remove package from local cache)
+
+(create and upload our '0.1' #rrev1 package version)
+$ conan create hello user/channel (previously did user/testing, using user/channel to create a '0.1' package version)
+$ conan upload "hello*" -r myconanrepo --all --confirm  (should upload '0.1' package to central repo)
+
+$ vi hello/src/hello.cpp (make change in hello.cpp)
+$ conan create hello user/channel (should now create '0.1' #rrev2 revision)
+$ conan upload "hello*" -r myconanrepo --all --confirm  (should upload '0.1' #rrev2 revision to central repo)
+$ conan search "hello/0.1@user/channel" --revisions -r=myconanrepo 
+(NOTE '--revisions' flag - can see recipe revision hashes rrev#'s!...)
+conan@7dc3e7b8b5ce:~/training/revisions$ conan search "hello/0.1@user/channel" --revisions -r=myconanrepo
+    Revisions for 'hello/0.1@user/channel' at remote 'myconanrepo':
+     66a8ee18b427ef70a2cb6da779e07fab (2022-03-16 18:53:46 UTC)
+     acb674638866b82547c847b6d1bba8b5 (2022-03-16 18:42:57 UTC)
+     3eaa188549d0e00822bcb0c76e09a3f2 (2022-03-16 18:34:18 UTC)
+     c54d4535f9b8f1c8c55534450429e236 (2022-03-16 18:15:12 UTC)
+
+* Consuming revisions:
+
+$ conan remove "hello*" -f 
+$ conan install hello/0.1@user/channel (by default, will be latest revision)
+$ conan remove "hello*" -f 
+$ conan install hello/0.1@user/channel#<revision-hash> (can get explicit revision, typically for debug only)
+
+* Lockfiles:
+Can create a package with a dependency to to another <pkg>/0.1 after creating a newer version <pkg>/0.2.
+Like 'locking' the dependency to a specific (older) version. Dependency graph stays exactly the same.
+Useful in CI jobs to maintain 'reproducable outputs' and 'reproducable builds'.
+
+Ex)  "chat" application is dependent on "hello" package
+$ conan remove "hello*" -f (remove any existing local package)
+$ conan create hello hello/0.1@user/channel (create version 0.1)
+$ conan lock create chat/conanfile.py --user=user --channel=channel (create a lock file, conan.lock)
+(now change source file, 'hello/src/hello.cpp' message)
+$ conan create hello hello/0.2@user/channel (create version 0.2)
+$ conan create chat user/channel (Will see hello/0.2 msg b/c not locked to hello/0.1)
+$ conan create chat user/channel --lockfile conan.lock (Now locking to hello/0.1 with lockfile)
+
+
+** PackageID:
+Recipes can adjust their own package IDs to use more than just options and settings in the package-ID calculation.
+
+* Method 'package_id()'
+  In recipe (conanfile.py) use 'package_id()' method.
+  Ex) Can override package-ID behavior in package_id() method
+      Use 'compatible_packages' feature. 
+	  If using gcc 4.9 and no binary available for this package has been built for 4.9
+	  then fallback to a binary that was built for 4.8 or 4.7.
+
+* PackageID Mode:
+
+  Default mode (known as semver direct mode):
+    Options and settings sections are included in package-ID calculation.
+    Under '[requires]' section or 'requires=' flag:
+	  Direct dependencies and major dependency version number are included in package-ID.
+	  Transitive dependencies and minor dependency version numbers are not included 
+	  in package-ID calculation.
+      Ex) In recipe (conanfile.py), requires = "poco/1.9.4" 
+        poco and major version number (1.) will be part of package-ID calc, 
+	    but minor version numbers (.9.4) will not.
+	    Also, poco dependencies of openssl and zlib will not be part of package-ID calc
+	    either, b/c they are transitive dependencies.
+
+  Changing default behavior:
+
+	Full Version Mode:
+	Ex) Add zlib/1.2.11 and openssl/1.0.2t to '[requires]' section
+	    Use 'full_version_mode()' method in package_id().
+		Now the zlib and openssl transitive dependencies along with their major and minor version numbers
+		will be added to the package-ID calc.
+		The poco dependency and major version number will be included as before, but now
+		it's minor version numbers (.9.4) will be included as well.
+
+  Configuration of 'default_package_id_mode' in conan.conf file:
+	Can set 'default_package_id_mode' attribute globally.
+	Ex) Set package id mode to full version mode
+	   In conan.conf:
+	     [general]
+		 default_package_id_mode = full_version_mode  (note 'semver_direct_mode' would be default value)
+
+   Ex) Considering problem if just using default mode.
+	   Application 'chat' built with dependency 'hello/1.0' would
+	   have the same package-ID as 'chat' built with dependency 'hello/1.1'
+	   b/c default mode ignores the minor version number.
+	   Change to 'full_version_mode' and 'chat' application can have two
+	   binaries, one for 'hello/1.0' and another for 'hello/1.1'.
+	   Also, b/c two seperate package-ID hashes, they both can be available in local cache.
+  
+
+$ conan remove "*" -f (remove local cache packages)
+$ conan create hello hello/1.0@user/testing
+$ conan create chat user/testing
+$ conan create app user/testing  (check package IDs)
+(do a change to hello/src/hello.h print message)
+$ conan create hello hello/1.1@user/testing
+$ conan create app user/testing (will see hello/1.0 msg instead of hello/1.1 !)
+$ conan config set general.default_package_id_mode=full_version_mode (set full version mode globally)
+$ conan create app user/testing (generates error b/c we don't have binary for chat)
+$ conan create app user/testing --build=missing (this will build missing binary)
+$ conan search chat/1.0@user/testing (check the different package IDs)
+
+** Hooks and Conan configuration:
+   
+ * Hooks feature: 
+    - Hooks give user's ability to run custom functions at various points in
+	  time during conan invocation.
+	- Hooks are user extensions, written in python.
+	- Hooks are executed at certain points in conan file: pre_build(), post_build(),
+	  pre_package(), post_package(), etc.
+	- Hooks should be orthogonal to recipes: 
+	  Orthogonal-to-recipes = should be able to add/remove any hook w/o affecting the binary
+	    package created in a build, examples include: custom checks, auxiliary logic, etc.
+	- Hooks are stored in cache: <userhome>/.conan/hooks
+	- Hooks are activated in: <userhome>/.conan/conan.conf
+	
+    Ex) Hook example: custom function 'pre_export()' in ~myconfig/hooks/check_name.py,
+	      def pre_export(output, conanfile, conanfile_path, reference, **kwargs):
+		    ref = str(reference)
+		    if ref.lower() != ref:
+			  raise Exception(f"{ref} should be lowercase!")
+
+ * Hooks activation:
+	- Copy hook in <username>/.conan/hooks:
+	  $ cp myconfig/hooks/check_name.py ~/.conan/hooks
+	- Activate in conan.conf: 
+	  $ vim ~/.conan/conan.conf (edit config file and add lines) 
+	    [hooks]
+		check_name
+		
+ * Conan config install:
+	- Command that can install/update in cache:
+		- Add/update: hooks, profiles
+		- Update: settings.yml, remotes.txt
+		- Add any other file (pylintrc)
+	- From:
+		- Git repo (master branch)
+		- Remote http zip file
+		- Local zip file
+		- Local folder
+	
+ Ex)Hooks and config install: Install and 'export' hook that avoids upper-case package names.
+	 If you try to create a package with uppercase name, you should see the hook raise an error.
+	 $ conan config install myconfig (script to setup hooks...)
+	     Processing conan.conf
+          Copying file check_name.py to /home/conan/.conan/hooks
+          Copying file rpi_armv7 to /home/conan/.conan/profiles
+	 $ conan new Hello-pkg/0.1 -s
+	 $ conan export . user/testing (generates error...)
+	     ERROR: [HOOK - check_name.py] pre_export(): Reference Hello-pkg/0.1@user/testing should be all lowercase.
+	 $ conan new hello-pkg/0.1 -s
+     $ conan export . user/testing (now okay b/c lowercase name)
+	 (Edit hook in myconfig to raise for "-" char)
+	 $ conan config install ('myconfig' argument was remembered!)
+	     Processing conan.conf
+          Copying file check_name.py to /home/conan/.conan/hooks
+          Copying file rpi_armv7 to /home/conan/.conan/profiles	 
+     $ conan export . user/testing (not okay b/c lowercase name contains a hyphen)
+	     ERROR: [HOOK - check_name.py] pre_export(): Reference hello-pkg/0.1@user/testing should not contain hyphens
+	
+	 
+ *** Homework ***
+	(Maybe a library from work with one or more dependencies?)
+	Create your own project with:
+		- all packages are your recipes
+		- build-requires and python-requires
+		- conditional requires
+	Enable revisions and change to "recipe_revision_mode"
+	Change an upstream dependency and rebuild the project
+		
+ *** Resources ***
+    Conan Docs: https://docs.conan.io/en/latest/
+      Read carefully, explore.
+    Reporting Issues:
+      Github issues: https://github.com/conan-io/conan
+      CppLang slack: https://cppalliance.org/slack/
+    Other JFrog Academy Courses
+      Conan Advanced
+      Conan CI / CD
+    Announcements:
+      Twitter : @conan_io : https://twitter.com/conan_io
+ 
+ 
+ 
+ 
+	
+
+
+
+
+
+
+
+
+
+   
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+
+    
+
+
+
+
+
+
